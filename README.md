@@ -38,7 +38,7 @@ ffrenc -i input.mov -- -vf scale=1280:720
 ## install
 
 ```bash
-cargo install --path .
+RUSTFLAGS="--cfg tracing_unstable" cargo install --git https://github.com/charliethomson/ffrenc
 ```
 
 ## why
