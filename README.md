@@ -40,6 +40,7 @@ ffrenc -i input.mov -- -vf scale=1280:720
 ```bash
 RUSTFLAGS="--cfg tracing_unstable" cargo install --git https://github.com/charliethomson/ffrenc
 ```
+> [tracing_unstable tracking issue](https://github.com/tokio-rs/tracing/discussions/1906)
 
 ## why
 
