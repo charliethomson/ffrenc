@@ -25,27 +25,48 @@ pub enum OutputFormat {
     JsonPretty,
 }
 
+/// ffmpeg wrapper to reencode video files, with some options
+
 #[derive(Parser, Debug, Valuable, Clone)]
+#[command(
+    version,
+    author,
+    about,
+    long_about = None,
+    help_template = "\
+{name} ({version})
+{author-with-newline}
+{about-with-newline}
+{usage-heading} {usage}
+
+{all-args}"
+)]
 pub struct Args {
-    // The input path, many paths are supported by passing `-i -`, and passing the list into stdin
+    /// Input path. Use '-' to read a list of paths from stdin (one per line)
     #[arg(short, long)]
     input: String,
 
+    /// Output path pattern. Use {SLUG} as placeholder for input filename without extension
     #[arg(short, long, default_value = "{SLUG}.renc.mp4")]
     output: String,
 
+    /// Disable audio encoding
     #[arg(long)]
     no_audio: bool,
 
+    /// Disable video encoding
     #[arg(long)]
     no_video: bool,
 
+    /// Overwrite output file if it already exists
     #[arg(short = 'y', long = "overwrite")]
     overwrite_output: bool,
 
+    /// Output format for progress and status information
     #[arg(short, long, value_enum, default_value_t=OutputFormat::Human)]
     format: OutputFormat,
 
+    /// Additional arguments to pass directly to FFmpeg
     #[allow(clippy::struct_field_names)]
     #[arg(last = true, allow_hyphen_values = true)]
     ffmpeg_args: Vec<String>,
