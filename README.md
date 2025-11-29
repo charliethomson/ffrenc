@@ -46,3 +46,8 @@ cargo install --path .
 got tired of typing the same ffmpeg commands over and over and trying to get progress for things that take a long time
 
 also this used to be a bash script that sucked, its just easier in rust
+
+
+## License
+
+dont care dont sue me, its 500 lines of wrapper code
