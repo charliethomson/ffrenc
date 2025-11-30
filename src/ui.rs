@@ -5,7 +5,10 @@ use std::{
     time::Duration,
 };
 
-use libffmpeg::util::cmd::{CommandError, CommandExit};
+use libffmpeg::{
+    ffmpeg::FfmpegError,
+    util::cmd::{CommandError, CommandExit},
+};
 use serde::Serialize;
 use std::time::Instant;
 use tokio::task::JoinHandle;
@@ -27,7 +30,7 @@ pub enum UiMessagePayload {
         exit: CommandExit,
     },
     Failed {
-        error: CommandError,
+        error: FfmpegError,
     },
     Progress {
         total: Duration,
