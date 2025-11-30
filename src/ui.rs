@@ -5,10 +5,7 @@ use std::{
     time::Duration,
 };
 
-use libffmpeg::{
-    ffmpeg::FfmpegError,
-    util::cmd::{CommandError, CommandExit},
-};
+use libffmpeg::{ffmpeg::FfmpegError, util::cmd::CommandExit};
 use serde::Serialize;
 use std::time::Instant;
 use tokio::task::JoinHandle;
