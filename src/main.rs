@@ -66,7 +66,11 @@ pub struct Args {
     #[arg(short, long, value_enum, default_value_t=OutputFormat::Human)]
     format: OutputFormat,
 
-    /// Additional arguments to pass directly to FFmpeg
+    /// Max concurrent tasks
+    #[arg(short, long, default_value_t = 1)]
+    parallel: usize,
+
+    /// Additional arguments to pass directly to `FFmpeg`
     #[allow(clippy::struct_field_names)]
     #[arg(last = true, allow_hyphen_values = true)]
     ffmpeg_args: Vec<String>,
@@ -143,7 +147,7 @@ async fn main() -> anyhow::Result<()> {
 
     let cx = Arc::new(SharedTaskContext::new(
         tx,
-        1,
+        args.parallel,
         cancellation_token.child_token(),
     ));
 

@@ -5,6 +5,7 @@ use std::{
     time::Duration,
 };
 
+use colored::Colorize;
 use libffmpeg::{ffmpeg::FfmpegError, util::cmd::CommandExit};
 use serde::Serialize;
 use std::time::Instant;
@@ -94,6 +95,8 @@ struct TaskInfo {
     output: PathBuf,
     active: bool,
     started_at: Option<String>,
+    elapsed: Option<String>,
+    eta: Option<String>,
     exited_at: Option<String>,
     success: Option<bool>,
     error_description: Option<String>,
@@ -104,30 +107,72 @@ struct TaskInfo {
 
 impl Row {
     fn to_string_human(&self) -> String {
-        format!(
-            "Total: {} | Active: {} | Completed: {} | Success: {} | Failed: {} | [{}]",
-            self.total_tasks,
-            self.active_tasks,
-            self.completed_tasks,
-            self.successful_tasks,
-            self.failed_tasks,
-            self.tasks
-                .iter()
-                .map(|t| {
-                    let status = if t.active {
-                        "A"
-                    } else if t.success == Some(true) {
-                        "S"
-                    } else if t.success == Some(false) {
-                        "E"
-                    } else {
-                        "Q"
-                    };
-                    format!("{}:{} {}", status, t.id, t.percent)
-                })
-                .collect::<Vec<_>>()
-                .join(" : ")
-        )
+        use std::fmt::Write;
+
+        let mut output = String::with_capacity(256);
+
+        let _ = write!(
+            output,
+            "\r{} | {} | {} | {} | {}",
+            format!("T: {}", self.total_tasks).bold(),
+            format!("A: {}", self.active_tasks).yellow(),
+            format!("S: {}", self.successful_tasks).green(),
+            format!("F: {}", self.failed_tasks).red(),
+            format!("C: {}", self.completed_tasks).blue(),
+        );
+
+        let active_tasks: Vec<_> = self.tasks.iter().filter(|t| t.active).collect();
+        if !active_tasks.is_empty() {
+            output.push_str(" | ");
+        }
+
+        let active_limit = 3;
+        for (i, task) in active_tasks.iter().take(active_limit).enumerate() {
+            if i > 0 {
+                output.push_str(" | ");
+            }
+
+            let filename = task
+                .input
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("?");
+
+            let percent_val = task
+                .percent
+                .trim_end_matches('%')
+                .parse::<f64>()
+                .unwrap_or(0.0);
+
+            let percent_colored = if percent_val < 33.0 {
+                task.percent.red()
+            } else if percent_val < 66.0 {
+                task.percent.yellow()
+            } else {
+                task.percent.green()
+            };
+
+            let _ = write!(output, "{}[{}", filename.cyan(), percent_colored,);
+
+            if let Some(ref eta) = task.eta {
+                let _ = write!(output, " {}", format!("eta: {eta}").dimmed());
+            }
+            if let Some(ref elapsed) = task.elapsed {
+                let _ = write!(output, " {}", format!("elapsed: {elapsed}").dimmed());
+            }
+
+            output.push(']');
+        }
+
+        if active_tasks.len() > active_limit {
+            let _ = write!(
+                output,
+                " {}",
+                format!("+{} more", active_tasks.len() - active_limit).dimmed()
+            );
+        }
+
+        output
     }
 
     fn to_string_json(&self) -> String {
@@ -229,6 +274,27 @@ impl UiState {
                 started_at: t
                     .started_at
                     .map(|i| format!("T-{:.0}", Instant::now().duration_since(i).as_secs_f64())),
+                elapsed: t.started_at.map(|i| {
+                    let d = Instant::now().duration_since(i);
+                    format!("{}m {}s", d.as_secs() / 60, d.as_secs() % 60)
+                }),
+                eta: t.started_at.and_then(|i| {
+                    let elapsed = Instant::now().duration_since(i).as_secs_f64();
+                    let progress = t.current.as_secs_f64();
+
+                    if progress < t.total.as_secs_f64() * 0.01 {
+                        return None;
+                    }
+
+                    let remaining = elapsed * (t.total.as_secs_f64() / progress - 1.0);
+
+                    if remaining > 3600.0 {
+                        return None;
+                    }
+
+                    let d = Duration::from_secs_f64(remaining.max(0.0));
+                    Some(format!("{}m {}s", d.as_secs() / 60, d.as_secs() % 60))
+                }),
                 exited_at: t
                     .exited_at
                     .map(|i| format!("T-{:.0}", Instant::now().duration_since(i).as_secs_f64())),
@@ -238,7 +304,8 @@ impl UiState {
                 current: format!("{:.1}s", t.current.as_secs_f64()),
                 percent: format!(
                     "{:.1}%",
-                    t.current.as_secs_f64() / t.total.as_secs_f64().max(f64::EPSILON) * 100.0
+                    (t.current.as_secs_f64() / t.total.as_secs_f64().max(f64::EPSILON) * 100.0)
+                        .min(100.0)
                 ),
             })
             .collect();
@@ -274,6 +341,8 @@ pub async fn ui_main(
     use std::io::stdout;
 
     let mut state = UiState::new();
+    let mut last_draw = Instant::now();
+    let draw_interval = Duration::from_millis(100);
 
     while !cancellation_token.is_cancelled() {
         let delivery_fut = tokio::time::timeout(
@@ -282,17 +351,27 @@ pub async fn ui_main(
         );
         let delivery = match delivery_fut.await {
             Ok(Some(Some(delivery))) => Some(delivery),
-            Ok(Some(None)) /* Closed */ => break,
-            Ok(None) /* Cancelled */ => break,
-            Err(_timeout) => None
+            Ok(Some(None)) => break,
+            Ok(None) => break,
+            Err(_timeout) => None,
         };
 
         if let Some(delivery) = delivery {
             state.update(delivery)?;
         }
 
-        let mut stdout = stdout().lock();
-        state.draw(&mut stdout, format)?;
+        // Rate limit drawing for human format
+        let should_draw = match format {
+            OutputFormat::Human => last_draw.elapsed() >= draw_interval,
+            _ => true,
+        };
+
+        if should_draw {
+            let mut stdout = stdout().lock();
+            state.draw(&mut stdout, format)?;
+            stdout.flush()?;
+            last_draw = Instant::now();
+        }
     }
 
     Ok(())
